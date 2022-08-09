@@ -1,0 +1,8 @@
+.background {
+  height: 100%;
+  background-color: var(#fff);
+  background-image: 
+    conic-gradient(at calc(100% - 2px) calc(100% - 2px),var(#366) 270deg, #0000 0),
+    conic-gradient(at calc(100% - 1px) calc(100% - 1px),var(#a9a9a9) 270deg, #0000 0);
+  background-size: 100px 100px, 20px 20px;
+}
