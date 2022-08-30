@@ -1,16 +1,19 @@
 import React, { StrictMode } from "react";
-import { Canvas } from "../Canvas";
-import { ResultArea } from "../ResultArea";
+import { Canvas } from "./Canvas";
+import { ResultArea } from "./ResultArea";
 import { useState, useEffect } from "react";
-import { Navbar } from "../Navbar/Navbar";
-import { Point } from "../Types";
+import { Navbar } from "./Navbar";
+import { Point, Stroke } from "./Types";
+import { FullScreenDialog } from "./FullScreenDialog";
 import Appkey from "../appkey.json";
+import Button from "@mui/material/Button";
 
-export const App = () => {
-  const [stroke, setStroke] = useState<Point[]>([]);
-  const [strokes, setStrokes] = useState<Point[][]>([]);
+export const HandwritingInput = () => {
+  const [dialogOpen, setDialogOpen] = useState<boolean>(false);
+  const [stroke, setStroke] = useState<Stroke>();
+  const [strokes, setStrokes] = useState<Stroke[]>([]);
 
-  const [undoStack, setUndoStack] = useState<Point[][]>([]);
+  const [undoStack, setUndoStack] = useState<Stroke[]>([]);
   const [operations, setOperations] = useState<string[]>([]);
   const [operationsUndo, setOperationsUndo] = useState<string[]>([]);
 
@@ -26,9 +29,11 @@ export const App = () => {
 
   const [requireCount, setRequireCount] = useState<number>(0);
 
+  const [checkFlag, setCheckFlag] = useState<boolean>(true);
+
   const height = 500;
   const width = 1000;
-  const linewidth = 3;
+  const linewidth = 6;
 
   useEffect(() => {
     requireAppToken();
@@ -37,9 +42,36 @@ export const App = () => {
   useEffect(() => {
     console.log(appToken);
     if (appToken !== "") {
-      requireRecgonition();
+      requireRecognition();
     }
   }, [appToken]);
+
+  useEffect(() => {
+    var drawFlag: boolean = true;
+    if (isDrawing) {
+      if (stroke) {
+        strokes.slice(0, -1).forEach((oldStroke) => {
+          if (isOverIntersectingThreshold(oldStroke, stroke)) {
+            setOperations((operation) => [...operation, "remove"]);
+            setUndoStack((undoStack) => [...undoStack, oldStroke]);
+            var tempStrokes = strokes.filter(
+              (tempStroke) => tempStroke !== oldStroke
+            );
+            setStrokes(tempStrokes);
+            drawFlag = false;
+          }
+        });
+      }
+      if (drawFlag) {
+        if (stroke) {
+          console.log(stroke);
+          setStrokes((strokes) => [...strokes, stroke]);
+        }
+        setOperations((operations) => [...operations, "draw"]);
+      }
+    }
+    setStroke(undefined);
+  }, [checkFlag]);
 
   const requireAppToken = async () => {
     var headers = new Headers();
@@ -79,7 +111,7 @@ export const App = () => {
     });
   };
 
-  const requireRecgonition = async () => {
+  const requireRecognition = async () => {
     var headers = new Headers();
     headers.append("app_token", appToken);
     headers.append("Content-Type", "application/json");
@@ -120,10 +152,14 @@ export const App = () => {
   };
 
   useEffect(() => {
-    if (uploadData) requireRecgonition();
+    transformData(strokes);
+  }, [strokes]);
+
+  useEffect(() => {
+    if (uploadData) requireRecognition();
   }, [uploadData]);
 
-  const transformData = (tempStrokes: Point[][]) => {
+  const transformData = (tempStrokes: Stroke[]) => {
     let strokeX: number[],
       strokeY: number[],
       strokesX: number[][] = [],
@@ -131,7 +167,7 @@ export const App = () => {
     for (const stroke of tempStrokes) {
       strokeX = [];
       strokeY = [];
-      for (const point of stroke) {
+      for (const point of stroke.points) {
         strokeX.push(point.x);
         strokeY.push(point.y);
       }
@@ -155,8 +191,14 @@ export const App = () => {
   const handlePointerDown = (point: Point) => {
     setIsDragging(true);
     if (isDrawing) {
-      setStroke((stroke) => [...stroke, point]);
-      setStrokes((strokes) => [...strokes, stroke]);
+      var currentStroke: Stroke = {
+        points: [point],
+        minX: point.x,
+        minY: point.y,
+        maxX: point.x,
+        maxY: point.y,
+      };
+      setStroke(currentStroke);
     } else {
       checkCollision(point);
     }
@@ -165,8 +207,17 @@ export const App = () => {
   const handlePointerMove = (point: Point) => {
     if (isDragging) {
       if (isDrawing) {
-        setStroke((stroke) => [...stroke, point]);
-        setStrokes((strokes) => [...strokes.slice(0, -1), stroke]);
+        if (stroke) {
+          var currentStroke = stroke;
+          currentStroke = {
+            points: [...stroke.points, point],
+            minX: Math.min(point.x, stroke.minX),
+            minY: Math.min(point.y, stroke.minY),
+            maxX: Math.max(point.x, stroke.maxX),
+            maxY: Math.max(point.x, stroke.maxY),
+          };
+          setStroke(currentStroke);
+        }
       } else {
         checkCollision(point);
       }
@@ -175,11 +226,56 @@ export const App = () => {
 
   const handlePointerUp = () => {
     setIsDragging(false);
-    if (isDrawing) {
-      setStroke([]);
-      setOperations((operations) => [...operations, "draw"]);
-      transformData(strokes);
-    }
+    setCheckFlag(!checkFlag);
+  };
+
+  const isOverIntersectingThreshold = (
+    newStroke: Stroke,
+    oldStroke: Stroke
+  ) => {
+    return (
+      intersectionOverOld(newStroke, oldStroke) > 0.85 ||
+      IOU(newStroke, oldStroke) > 0.3
+    );
+  };
+
+  const intersectionOverOld = (oldStroke: Stroke, newStroke: Stroke) => {
+    const xA = Math.max(newStroke.minX, oldStroke.minX);
+    const yA = Math.max(newStroke.minY, oldStroke.minY);
+    const xB = Math.min(newStroke.maxX, oldStroke.maxX);
+    const yB = Math.min(newStroke.maxY, oldStroke.maxY);
+
+    const intersectionArea =
+      Math.max(0, xB - xA + 1) * Math.max(0, yB - yA + 1);
+
+    const box2area =
+      (oldStroke.maxX - oldStroke.minX + 1) *
+      (oldStroke.maxY - oldStroke.minY + 1);
+
+    const ioo = intersectionArea / box2area;
+
+    return ioo;
+  };
+
+  const IOU = (newStroke: Stroke, oldStroke: Stroke) => {
+    const xA = Math.max(newStroke.minX, oldStroke.minX);
+    const yA = Math.max(newStroke.minY, oldStroke.minY);
+    const xB = Math.min(newStroke.maxX, oldStroke.maxX);
+    const yB = Math.min(newStroke.maxY, oldStroke.maxY);
+
+    const intersectionArea =
+      Math.max(0, xB - xA + 1) * Math.max(0, yB - yA + 1);
+
+    const box1area =
+      (newStroke.maxX - newStroke.minX + 1) *
+      (newStroke.maxY - newStroke.minY + 1);
+    const box2area =
+      (oldStroke.maxX - oldStroke.minX + 1) *
+      (oldStroke.maxY - oldStroke.minY + 1);
+
+    const iou = intersectionArea / (box1area + box2area - intersectionArea);
+
+    return iou;
   };
 
   const handleUndo = () => {
@@ -226,7 +322,6 @@ export const App = () => {
     setUndoStack((undoStack) => [...undoStack, strokes[strokes.length - 1]]);
     const tempStrokes = strokes.slice(0, -1);
     setStrokes(tempStrokes);
-    transformData(tempStrokes);
   };
 
   const restoreLastStroke = () => {
@@ -236,14 +331,13 @@ export const App = () => {
     const tempStrokes = [...strokes, undoStack[undoStack.length - 1]];
     setStrokes(tempStrokes);
     setUndoStack((undoStack) => undoStack.slice(0, -1));
-    transformData(tempStrokes);
   };
 
   const checkCollision = (point: Point) => {
     const x = point.x;
     const y = point.y;
     for (const tempStroke of strokes) {
-      for (const tempPoint of tempStroke) {
+      for (const tempPoint of tempStroke.points) {
         const tempX = tempPoint.x;
         const tempY = tempPoint.y;
         if (
@@ -256,7 +350,6 @@ export const App = () => {
           setUndoStack((undoStack) => [...undoStack, tempStroke]);
           const tempStrokes = strokes.filter((stroke) => stroke !== tempStroke);
           setStrokes(tempStrokes);
-          transformData(tempStrokes);
           return;
         }
       }
@@ -266,31 +359,47 @@ export const App = () => {
   return (
     <StrictMode>
       {" "}
-      <div
-        style={{
-          display: "grid",
-          justifyContent: "center",
-          alignContent: "center",
+      <Button
+        variant="text"
+        onClick={() => {
+          setDialogOpen(true);
         }}
       >
-        <Navbar
-          onUndoClick={handleUndo}
-          onRedoClick={handleRedo}
-          onDeleteClick={handleDelete}
-          onCutClick={handleCut}
-          isDrawing={isDrawing}
-        ></Navbar>
-        <Canvas
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          width={width}
-          height={height}
-          strokes={strokes}
-          linewidth={linewidth}
-        ></Canvas>
-        <ResultArea renderString={renderString}></ResultArea>
-      </div>
+        Handwriting Input
+      </Button>
+      <FullScreenDialog
+        open={dialogOpen}
+        onClose={() => {
+          setDialogOpen(false);
+        }}
+      >
+        <div
+          style={{
+            display: "grid",
+            justifyContent: "center",
+            alignContent: "center",
+          }}
+        >
+          <Navbar
+            onUndoClick={handleUndo}
+            onRedoClick={handleRedo}
+            onDeleteClick={handleDelete}
+            onCutClick={handleCut}
+            isDrawing={isDrawing}
+          ></Navbar>
+          <Canvas
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            width={width}
+            height={height}
+            strokes={strokes}
+            currentStroke={stroke}
+            linewidth={linewidth}
+          ></Canvas>
+          <ResultArea renderString={renderString}></ResultArea>
+        </div>
+      </FullScreenDialog>
     </StrictMode>
   );
 };

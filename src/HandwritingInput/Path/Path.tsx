@@ -24,7 +24,6 @@ export const Path = (props: PathProps) => {
         return `${s.x} ${s.y}`;
       })
       .join(" L ");
-
   return (
     <path
       fill="none"

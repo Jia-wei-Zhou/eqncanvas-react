@@ -2,13 +2,14 @@ import React from "react";
 import Box from "@mui/material/Box";
 import { useRef } from "react";
 import { Path } from "../Path";
-import { Point } from "../Types";
+import { Point, Stroke } from "../Types";
 
 export interface CanvasProps {
   onPointerDown: (point: Point) => void;
   onPointerMove: (point: Point) => void;
   onPointerUp: () => void;
-  strokes: Point[][];
+  strokes: Stroke[];
+  currentStroke: Stroke | undefined;
   width: number;
   height: number;
   linewidth: number;
@@ -20,6 +21,7 @@ export const Canvas = (props: CanvasProps) => {
     onPointerMove,
     onPointerUp,
     strokes,
+    currentStroke,
     width,
     height,
     linewidth,
@@ -84,8 +86,15 @@ export const Canvas = (props: CanvasProps) => {
         }}
       >
         {strokes?.map((stroke, index) => (
-          <Path key={index} stroke={stroke} width={linewidth}></Path>
+          <Path key={index} stroke={stroke.points} width={linewidth}></Path>
         ))}
+        {currentStroke && (
+          <Path
+            key={strokes.length}
+            stroke={currentStroke.points}
+            width={linewidth}
+          ></Path>
+        )}
       </svg>
     </Box>
   );
